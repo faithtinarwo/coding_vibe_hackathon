@@ -1,336 +1,803 @@
-from flask import Flask, render_template, request, jsonify, session
-from flask_sqlalchemy import SQLAlchemy
+#!/usr/bin/env python3
+"""
+TradeJoy - Voice-First AI Business Companion
+Flask backend server for lightweight storefront management
+"""
+
+from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_cors import CORS
+from datetime import datetime, timedelta
 import sqlite3
-import hashlib
-import secrets
-import datetime
-import yfinance as yf
-import pandas as pd
-from werkzeug.security import generate_password_hash, check_password_hash
+import json
+import os
+import logging
+from typing import Dict, List, Optional
+import re
+from dataclasses import dataclass, asdict
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = secrets.token_hex(16)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///tradewise.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-db = SQLAlchemy(app)
 CORS(app)
 
-# Database Models
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(120), nullable=False)
-    balance = db.Column(db.Float, default=10000.0)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+# Configuration
+DATABASE_PATH = 'tradejoy.db'
+UPLOAD_FOLDER = 'uploads'
+MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file upload
 
-class Portfolio(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    symbol = db.Column(db.String(10), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
-    avg_price = db.Column(db.Float, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
-class Trade(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    symbol = db.Column(db.String(10), nullable=False)
-    action = db.Column(db.String(4), nullable=False)  # BUY or SELL
-    quantity = db.Column(db.Integer, nullable=False)
-    price = db.Column(db.Float, nullable=False)
-    total = db.Column(db.Float, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+# Ensure upload directory exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-class Watchlist(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    symbol = db.Column(db.String(10), nullable=False)
-    added_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+@dataclass
+class Transaction:
+    """Transaction data model"""
+    id: Optional[int] = None
+    user_id: str = "demo_user"
+    type: str = ""  # 'sale' or 'expense'
+    amount: float = 0.0
+    description: str = ""
+    category: str = ""
+    timestamp: str = ""
+    date: str = ""
+
+@dataclass
+class BusinessStats:
+    """Business statistics model"""
+    today_profit: float = 0.0
+    total_sales: float = 0.0
+    total_expenses: float = 0.0
+    net_profit: float = 0.0
+    total_transactions: int = 0
+
+class DatabaseManager:
+    """Handles all database operations"""
+    
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.init_database()
+    
+    def init_database(self):
+        """Initialize database tables"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Create transactions table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS transactions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        type TEXT NOT NULL,
+                        amount REAL NOT NULL,
+                        description TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        timestamp TEXT NOT NULL,
+                        date TEXT NOT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Create milestones table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS milestones (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        milestone_type TEXT NOT NULL,
+                        achieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(user_id, milestone_type)
+                    )
+                ''')
+                
+                # Create business_profiles table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS business_profiles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT UNIQUE NOT NULL,
+                        business_name TEXT,
+                        business_type TEXT,
+                        daily_target REAL DEFAULT 500.0,
+                        weekly_target REAL DEFAULT 3500.0,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                conn.commit()
+                logger.info("Database initialized successfully")
+                
+        except Exception as e:
+            logger.error(f"Database initialization error: {e}")
+            raise
+    
+    def add_transaction(self, transaction: Transaction) -> int:
+        """Add a new transaction"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO transactions 
+                    (user_id, type, amount, description, category, timestamp, date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    transaction.user_id,
+                    transaction.type,
+                    transaction.amount,
+                    transaction.description,
+                    transaction.category,
+                    transaction.timestamp,
+                    transaction.date
+                ))
+                
+                transaction_id = cursor.lastrowid
+                conn.commit()
+                logger.info(f"Transaction added: ID {transaction_id}")
+                return transaction_id
+                
+        except Exception as e:
+            logger.error(f"Error adding transaction: {e}")
+            raise
+    
+    def get_transactions(self, user_id: str, limit: int = 50) -> List[Dict]:
+        """Get user transactions"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, type, amount, description, category, timestamp, date
+                    FROM transactions 
+                    WHERE user_id = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                ''', (user_id, limit))
+                
+                columns = ['id', 'type', 'amount', 'description', 'category', 'timestamp', 'date']
+                transactions = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                
+                return transactions
+                
+        except Exception as e:
+            logger.error(f"Error fetching transactions: {e}")
+            return []
+    
+    def delete_transaction(self, transaction_id: int, user_id: str) -> bool:
+        """Delete a transaction"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM transactions 
+                    WHERE id = ? AND user_id = ?
+                ''', (transaction_id, user_id))
+                
+                deleted = cursor.rowcount > 0
+                conn.commit()
+                logger.info(f"Transaction {transaction_id} deleted: {deleted}")
+                return deleted
+                
+        except Exception as e:
+            logger.error(f"Error deleting transaction: {e}")
+            return False
+    
+    def get_business_stats(self, user_id: str) -> BusinessStats:
+        """Calculate business statistics"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get today's date
+                today = datetime.now().strftime('%Y-%m-%d')
+                
+                # Total sales
+                cursor.execute('''
+                    SELECT COALESCE(SUM(amount), 0) FROM transactions
+                    WHERE user_id = ? AND type = 'sale'
+                ''', (user_id,))
+                total_sales = cursor.fetchone()[0]
+                
+                # Total expenses
+                cursor.execute('''
+                    SELECT COALESCE(SUM(amount), 0) FROM transactions
+                    WHERE user_id = ? AND type = 'expense'
+                ''', (user_id,))
+                total_expenses = cursor.fetchone()[0]
+                
+                # Today's sales
+                cursor.execute('''
+                    SELECT COALESCE(SUM(amount), 0) FROM transactions
+                    WHERE user_id = ? AND type = 'sale' AND date = ?
+                ''', (user_id, today))
+                today_sales = cursor.fetchone()[0]
+                
+                # Today's expenses
+                cursor.execute('''
+                    SELECT COALESCE(SUM(amount), 0) FROM transactions
+                    WHERE user_id = ? AND type = 'expense' AND date = ?
+                ''', (user_id, today))
+                today_expenses = cursor.fetchone()[0]
+                
+                # Total transactions count
+                cursor.execute('''
+                    SELECT COUNT(*) FROM transactions WHERE user_id = ?
+                ''', (user_id,))
+                total_transactions = cursor.fetchone()[0]
+                
+                return BusinessStats(
+                    today_profit=today_sales - today_expenses,
+                    total_sales=total_sales,
+                    total_expenses=total_expenses,
+                    net_profit=total_sales - total_expenses,
+                    total_transactions=total_transactions
+                )
+                
+        except Exception as e:
+            logger.error(f"Error calculating stats: {e}")
+            return BusinessStats()
+    
+    def get_business_profile(self, user_id: str) -> Optional[Dict]:
+        """Get business profile"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT business_name, business_type, daily_target, weekly_target
+                    FROM business_profiles WHERE user_id = ?
+                ''', (user_id,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'business_name': row[0],
+                        'business_type': row[1],
+                        'daily_target': row[2],
+                        'weekly_target': row[3]
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error fetching business profile: {e}")
+            return None
+    
+    def update_business_profile(self, user_id: str, profile_data: Dict) -> bool:
+        """Update or create business profile"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO business_profiles 
+                    (user_id, business_name, business_type, daily_target, weekly_target, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    user_id,
+                    profile_data.get('business_name'),
+                    profile_data.get('business_type'),
+                    profile_data.get('daily_target', 500.0),
+                    profile_data.get('weekly_target', 3500.0),
+                    datetime.now().isoformat()
+                ))
+                
+                conn.commit()
+                logger.info(f"Business profile updated for user: {user_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error updating business profile: {e}")
+            return False
+
+class VoiceProcessor:
+    """Processes voice commands and extracts transaction data"""
+    
+    @staticmethod
+    def process_voice_command(command: str) -> Optional[Transaction]:
+        """Process voice command and extract transaction details"""
+        command_lower = command.lower()
+        
+        # Extract amounts (supports various formats)
+        amount_patterns = [
+            r'(\d+(?:\.\d{2})?)\s*(?:rupees?|rs?\.?|₹)',
+            r'(?:rupees?|rs?\.?|₹)\s*(\d+(?:\.\d{2})?)',
+            r'(\d+(?:\.\d{2})?)\s*(?:dollars?|\$)',
+            r'for\s*(\d+(?:\.\d{2})?)',
+            r'(\d+(?:\.\d{2})?)\s*(?:bucks?)'
+        ]
+        
+        amount = None
+        for pattern in amount_patterns:
+            match = re.search(pattern, command_lower)
+            if match:
+                amount = float(match.group(1))
+                break
+        
+        if not amount:
+            return None
+        
+        # Determine transaction type
+        sale_keywords = ['sold', 'sale', 'earned', 'received', 'got', 'made']
+        expense_keywords = ['bought', 'spent', 'paid', 'purchased', 'expense', 'cost']
+        
+        transaction_type = None
+        if any(keyword in command_lower for keyword in sale_keywords):
+            transaction_type = 'sale'
+        elif any(keyword in command_lower for keyword in expense_keywords):
+            transaction_type = 'expense'
+        
+        if not transaction_type:
+            return None
+        
+        # Extract description
+        description = VoiceProcessor._extract_description(command, transaction_type)
+        
+        # Determine category
+        category = VoiceProcessor._categorize_transaction(command, transaction_type)
+        
+        return Transaction(
+            type=transaction_type,
+            amount=amount,
+            description=description,
+            category=category,
+            timestamp=datetime.now().isoformat(),
+            date=datetime.now().strftime('%Y-%m-%d')
+        )
+    
+    @staticmethod
+    def _extract_description(command: str, transaction_type: str) -> str:
+        """Extract description from voice command"""
+        command_lower = command.lower()
+        
+        if transaction_type == 'sale':
+            # Look for items sold
+            patterns = [
+                r'sold\s+(.+?)\s+for',
+                r'sale\s+of\s+(.+?)\s+for',
+                r'earned\s+from\s+(.+?)\s+',
+            ]
+        else:
+            # Look for items bought
+            patterns = [
+                r'bought\s+(.+?)\s+for',
+                r'spent\s+on\s+(.+?)\s+',
+                r'paid\s+for\s+(.+?)\s+',
+            ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, command_lower)
+            if match:
+                return match.group(1).strip().title()
+        
+        # Fallback descriptions
+        return f"Voice recorded {transaction_type}"
+    
+    @staticmethod
+    def _categorize_transaction(command: str, transaction_type: str) -> str:
+        """Categorize transaction based on content"""
+        command_lower = command.lower()
+        
+        # Category keywords
+        categories = {
+            'product-sale': ['vegetables', 'fruits', 'food', 'products', 'items', 'goods'],
+            'service': ['service', 'repair', 'consultation', 'work'],
+            'supplies': ['supplies', 'materials', 'inventory', 'stock'],
+            'transport': ['transport', 'taxi', 'bus', 'fuel', 'petrol', 'gas'],
+            'food': ['food', 'lunch', 'dinner', 'snacks', 'tea', 'coffee'],
+            'utilities': ['electricity', 'water', 'phone', 'internet', 'rent']
+        }
+        
+        for category, keywords in categories.items():
+            if any(keyword in command_lower for keyword in keywords):
+                return category
+        
+        # Default categories
+        return 'product-sale' if transaction_type == 'sale' else 'supplies'
+
+class BusinessCoach:
+    """AI Business Coach for providing tips and insights"""
+    
+    @staticmethod
+    def get_personalized_tip(stats: BusinessStats, recent_transactions: List[Dict]) -> str:
+        """Generate personalized business tip"""
+        
+        if stats.total_transactions == 0:
+            return "Welcome! Start by recording your first sale or expense to begin tracking your business."
+        
+        if stats.today_profit > 500:
+            return f"Excellent! You're ₹{stats.today_profit:.2f} in profit today. You're exceeding your daily target!"
+        
+        if stats.today_profit > 0:
+            return f"Good work! You're ₹{stats.today_profit:.2f} in profit today. Keep it up!"
+        
+        if stats.net_profit > 0:
+            return f"Overall, you're ₹{stats.net_profit:.2f} in profit. Focus on increasing daily sales!"
+        
+        tips = [
+            "Track every small transaction - they add up quickly!",
+            "Try using voice commands for faster data entry.",
+            "Set a daily target to stay motivated.",
+            "Review your expenses weekly to find savings.",
+            "Celebrate small wins to stay motivated!"
+        ]
+        
+        import random
+        return random.choice(tips)
+
+# Initialize database
+db_manager = DatabaseManager(DATABASE_PATH)
 
 # Routes
 @app.route('/')
 def index():
+    """Serve the main application"""
     return render_template('index.html')
 
-@app.route('/api/register', methods=['POST'])
-def register():
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        email = data.get('email')
-        password = data.get('password')
-        
-        if User.query.filter_by(username=username).first():
-            return jsonify({'error': 'Username already exists'}), 400
-        
-        if User.query.filter_by(email=email).first():
-            return jsonify({'error': 'Email already exists'}), 400
-        
-        password_hash = generate_password_hash(password)
-        user = User(username=username, email=email, password_hash=password_hash)
-        db.session.add(user)
-        db.session.commit()
-        
-        session['user_id'] = user.id
-        return jsonify({'success': True, 'user_id': user.id}), 201
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+@app.route('/styles.css')
+def styles():
+    """Serve CSS file"""
+    return send_from_directory('.', 'styles.css')
 
-@app.route('/api/login', methods=['POST'])
-def login():
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        password = data.get('password')
-        
-        user = User.query.filter_by(username=username).first()
-        if user and check_password_hash(user.password_hash, password):
-            session['user_id'] = user.id
-            return jsonify({'success': True, 'user_id': user.id}), 200
-        
-        return jsonify({'error': 'Invalid credentials'}), 401
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+@app.route('/scripts.js')
+def script():
+    """Serve JavaScript file"""
+    return send_from_directory('.', 'scripts.js')
 
-@app.route('/api/logout', methods=['POST'])
-def logout():
-    session.pop('user_id', None)
-    return jsonify({'success': True}), 200
-
-@app.route('/api/stock/<symbol>')
-def get_stock_data(symbol):
-    try:
-        stock = yf.Ticker(symbol.upper())
-        info = stock.info
-        hist = stock.history(period="1d", interval="1m")
-        
-        current_price = info.get('currentPrice', 0)
-        if current_price == 0 and not hist.empty:
-            current_price = hist['Close'].iloc[-1]
-        
-        return jsonify({
-            'symbol': symbol.upper(),
-            'price': round(current_price, 2),
-            'change': round(info.get('regularMarketChange', 0), 2),
-            'changePercent': round(info.get('regularMarketChangePercent', 0), 2),
-            'volume': info.get('volume', 0),
-            'marketCap': info.get('marketCap', 0),
-            'dayHigh': round(info.get('dayHigh', 0), 2),
-            'dayLow': round(info.get('dayLow', 0), 2)
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/portfolio')
-def get_portfolio():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Not authenticated'}), 401
+@app.route('/api/transactions', methods=['GET'])
+def get_transactions():
+    """Get user transactions"""
+    user_id = request.args.get('user_id', 'demo_user')
+    limit = int(request.args.get('limit', 50))
     
     try:
-        user_id = session['user_id']
-        portfolio = Portfolio.query.filter_by(user_id=user_id).all()
-        
-        portfolio_data = []
-        total_value = 0
-        
-        for item in portfolio:
-            try:
-                stock = yf.Ticker(item.symbol)
-                current_price = stock.info.get('currentPrice', item.avg_price)
-                value = current_price * item.quantity
-                total_value += value
-                
-                portfolio_data.append({
-                    'symbol': item.symbol,
-                    'quantity': item.quantity,
-                    'avgPrice': item.avg_price,
-                    'currentPrice': current_price,
-                    'value': round(value, 2),
-                    'pnl': round((current_price - item.avg_price) * item.quantity, 2)
-                })
-            except:
-                value = item.avg_price * item.quantity
-                total_value += value
-                portfolio_data.append({
-                    'symbol': item.symbol,
-                    'quantity': item.quantity,
-                    'avgPrice': item.avg_price,
-                    'currentPrice': item.avg_price,
-                    'value': round(value, 2),
-                    'pnl': 0
-                })
-        
-        user = User.query.get(user_id)
+        transactions = db_manager.get_transactions(user_id, limit)
         return jsonify({
-            'portfolio': portfolio_data,
-            'totalValue': round(total_value, 2),
-            'cash': round(user.balance, 2)
+            'success': True,
+            'transactions': transactions
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error fetching transactions: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch transactions'
+        }), 500
 
-@app.route('/api/trade', methods=['POST'])
-def execute_trade():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
+@app.route('/api/transactions', methods=['POST'])
+def add_transaction():
+    """Add new transaction"""
     try:
         data = request.get_json()
-        user_id = session['user_id']
-        symbol = data.get('symbol').upper()
-        action = data.get('action').upper()
-        quantity = int(data.get('quantity'))
         
-        # Get current stock price
-        stock = yf.Ticker(symbol)
-        current_price = stock.info.get('currentPrice', 0)
-        if current_price == 0:
-            return jsonify({'error': 'Unable to get stock price'}), 400
+        # Validate required fields
+        required_fields = ['type', 'amount', 'description', 'category']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'success': False,
+                    'error': f'Missing required field: {field}'
+                }), 400
         
-        total_cost = current_price * quantity
-        user = User.query.get(user_id)
-        
-        if action == 'BUY':
-            if user.balance < total_cost:
-                return jsonify({'error': 'Insufficient funds'}), 400
-            
-            # Update user balance
-            user.balance -= total_cost
-            
-            # Update portfolio
-            existing = Portfolio.query.filter_by(user_id=user_id, symbol=symbol).first()
-            if existing:
-                total_quantity = existing.quantity + quantity
-                total_cost_basis = (existing.avg_price * existing.quantity) + (current_price * quantity)
-                existing.avg_price = total_cost_basis / total_quantity
-                existing.quantity = total_quantity
-            else:
-                portfolio_item = Portfolio(
-                    user_id=user_id,
-                    symbol=symbol,
-                    quantity=quantity,
-                    avg_price=current_price
-                )
-                db.session.add(portfolio_item)
-        
-        elif action == 'SELL':
-            existing = Portfolio.query.filter_by(user_id=user_id, symbol=symbol).first()
-            if not existing or existing.quantity < quantity:
-                return jsonify({'error': 'Insufficient shares'}), 400
-            
-            # Update user balance
-            user.balance += total_cost
-            
-            # Update portfolio
-            existing.quantity -= quantity
-            if existing.quantity == 0:
-                db.session.delete(existing)
-        
-        # Record trade
-        trade = Trade(
-            user_id=user_id,
-            symbol=symbol,
-            action=action,
-            quantity=quantity,
-            price=current_price,
-            total=total_cost
+        # Create transaction
+        transaction = Transaction(
+            user_id=data.get('user_id', 'demo_user'),
+            type=data['type'],
+            amount=float(data['amount']),
+            description=data['description'],
+            category=data['category'],
+            timestamp=datetime.now().isoformat(),
+            date=datetime.now().strftime('%Y-%m-%d')
         )
-        db.session.add(trade)
-        db.session.commit()
         
-        return jsonify({'success': True, 'message': f'{action} order executed successfully'})
+        # Add to database
+        transaction_id = db_manager.add_transaction(transaction)
+        
+        return jsonify({
+            'success': True,
+            'transaction_id': transaction_id,
+            'message': 'Transaction added successfully'
+        })
+        
     except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error adding transaction: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to add transaction'
+        }), 500
 
-@app.route('/api/watchlist')
-def get_watchlist():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Not authenticated'}), 401
+@app.route('/api/transactions/<int:transaction_id>', methods=['DELETE'])
+def delete_transaction(transaction_id):
+    """Delete transaction"""
+    user_id = request.args.get('user_id', 'demo_user')
     
     try:
-        user_id = session['user_id']
-        watchlist = Watchlist.query.filter_by(user_id=user_id).all()
+        success = db_manager.delete_transaction(transaction_id, user_id)
         
-        watchlist_data = []
-        for item in watchlist:
-            try:
-                stock = yf.Ticker(item.symbol)
-                info = stock.info
-                current_price = info.get('currentPrice', 0)
-                
-                watchlist_data.append({
-                    'symbol': item.symbol,
-                    'price': round(current_price, 2),
-                    'change': round(info.get('regularMarketChange', 0), 2),
-                    'changePercent': round(info.get('regularMarketChangePercent', 0), 2)
-                })
-            except:
-                watchlist_data.append({
-                    'symbol': item.symbol,
-                    'price': 0,
-                    'change': 0,
-                    'changePercent': 0
-                })
-        
-        return jsonify(watchlist_data)
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Transaction deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Transaction not found'
+            }), 404
+            
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error deleting transaction: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to delete transaction'
+        }), 500
 
-@app.route('/api/watchlist/add', methods=['POST'])
-def add_to_watchlist():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
+@app.route('/api/voice-command', methods=['POST'])
+def process_voice_command():
+    """Process voice command and extract transaction"""
     try:
         data = request.get_json()
-        user_id = session['user_id']
-        symbol = data.get('symbol').upper()
+        command = data.get('command', '')
         
-        existing = Watchlist.query.filter_by(user_id=user_id, symbol=symbol).first()
-        if existing:
-            return jsonify({'error': 'Stock already in watchlist'}), 400
+        if not command:
+            return jsonify({
+                'success': False,
+                'error': 'No voice command provided'
+            }), 400
         
-        watchlist_item = Watchlist(user_id=user_id, symbol=symbol)
-        db.session.add(watchlist_item)
-        db.session.commit()
+        # Process voice command
+        transaction = VoiceProcessor.process_voice_command(command)
         
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/trades')
-def get_trades():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    try:
-        user_id = session['user_id']
-        trades = Trade.query.filter_by(user_id=user_id).order_by(Trade.timestamp.desc()).limit(50).all()
-        
-        trades_data = []
-        for trade in trades:
-            trades_data.append({
-                'symbol': trade.symbol,
-                'action': trade.action,
-                'quantity': trade.quantity,
-                'price': trade.price,
-                'total': trade.total,
-                'timestamp': trade.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        if not transaction:
+            return jsonify({
+                'success': False,
+                'error': 'Could not extract transaction from voice command',
+                'suggestions': [
+                    'Try: "I sold apples for 50 rupees"',
+                    'Try: "Bought supplies for ₹200"',
+                    'Try: "Made 300 from service"'
+                ]
             })
         
-        return jsonify(trades_data)
+        # Set user ID
+        transaction.user_id = data.get('user_id', 'demo_user')
+        
+        # Add to database
+        transaction_id = db_manager.add_transaction(transaction)
+        transaction.id = transaction_id
+        
+        return jsonify({
+            'success': True,
+            'transaction': asdict(transaction),
+            'message': 'Transaction extracted and added successfully'
+        })
+        
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error processing voice command: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to process voice command'
+        }), 500
+
+@app.route('/api/stats', methods=['GET'])
+def get_business_stats():
+    """Get business statistics"""
+    user_id = request.args.get('user_id', 'demo_user')
     
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    return {"status": "ok"}, 200
+    try:
+        stats = db_manager.get_business_stats(user_id)
+        return jsonify({
+            'success': True,
+            'stats': asdict(stats)
+        })
+    except Exception as e:
+        logger.error(f"Error fetching stats: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch statistics'
+        }), 500
+
+@app.route('/api/coach-tip', methods=['GET'])
+def get_coach_tip():
+    """Get personalized business coaching tip"""
+    user_id = request.args.get('user_id', 'demo_user')
+    
+    try:
+        stats = db_manager.get_business_stats(user_id)
+        recent_transactions = db_manager.get_transactions(user_id, 10)
+        tip = BusinessCoach.get_personalized_tip(stats, recent_transactions)
+        
+        return jsonify({
+            'success': True,
+            'tip': tip,
+            'stats': asdict(stats)
+        })
+    except Exception as e:
+        logger.error(f"Error generating tip: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to generate tip'
+        }), 500
+
+@app.route('/api/profile', methods=['GET'])
+def get_business_profile():
+    """Get business profile"""
+    user_id = request.args.get('user_id', 'demo_user')
+    
+    try:
+        profile = db_manager.get_business_profile(user_id)
+        return jsonify({
+            'success': True,
+            'profile': profile
+        })
+    except Exception as e:
+        logger.error(f"Error fetching profile: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch profile'
+        }), 500
+
+@app.route('/api/profile', methods=['POST'])
+def update_business_profile():
+    """Update business profile"""
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id', 'demo_user')
+        
+        success = db_manager.update_business_profile(user_id, data)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Profile updated successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to update profile'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error updating profile: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to update profile'
+        }), 500
+
+@app.route('/api/analytics', methods=['GET'])
+def get_analytics():
+    """Get business analytics data"""
+    user_id = request.args.get('user_id', 'demo_user')
+    days = int(request.args.get('days', 7))
+    
+    try:
+        with sqlite3.connect(DATABASE_PATH) as conn:
+            cursor = conn.cursor()
+            
+            # Get daily data for the last N days
+            start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+            
+            cursor.execute('''
+                SELECT date, 
+                       SUM(CASE WHEN type = 'sale' THEN amount ELSE 0 END) as sales,
+                       SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as expenses
+                FROM transactions 
+                WHERE user_id = ? AND date >= ?
+                GROUP BY date
+                ORDER BY date
+            ''', (user_id, start_date))
+            
+            daily_data = []
+            for row in cursor.fetchall():
+                daily_data.append({
+                    'date': row[0],
+                    'sales': row[1],
+                    'expenses': row[2],
+                    'profit': row[1] - row[2]
+                })
+            
+            # Get category breakdown
+            cursor.execute('''
+                SELECT category, SUM(amount) as total
+                FROM transactions 
+                WHERE user_id = ? AND type = 'sale'
+                GROUP BY category
+                ORDER BY total DESC
+            ''', (user_id,))
+            
+            category_data = [{'category': row[0], 'amount': row[1]} for row in cursor.fetchall()]
+            
+            return jsonify({
+                'success': True,
+                'analytics': {
+                    'daily_data': daily_data,
+                    'category_breakdown': category_data
+                }
+            })
+            
+    except Exception as e:
+        logger.error(f"Error fetching analytics: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch analytics'
+        }), 500
+
+@app.errorhandler(404)
+def not_found(error):
+    # If the requested URL is for a static file, let Flask try to serve it normally
+    if request.path.startswith('/static/'):
+        # Try to serve the static file manually or return the default 404
+        filename = request.path[len('/static/'):]
+        return send_from_directory('static', filename)
+
+    return jsonify({
+        'success': False,
+        'error': 'Endpoint not found'
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors"""
+    return jsonify({
+        'success': False,
+        'error': 'Internal server error'
+    }), 500
+
+
+@app.route('/routes')
+def list_routes():
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            'endpoint': rule.endpoint,
+            'methods': list(rule.methods),
+            'url': str(rule)
+        })
+    return jsonify(routes)
+
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
+    # Create demo data if database is empty
+    try:
+        stats = db_manager.get_business_stats('demo_user')
+        if stats.total_transactions == 0:
+            logger.info("Creating demo data...")
+            
+            # Add some demo transactions
+            demo_transactions = [
+                Transaction(
+                    user_id='demo_user',
+                    type='sale',
+                    amount=150.0,
+                    description='Vegetables Sale',
+                    category='product-sale',
+                    timestamp=(datetime.now() - timedelta(hours=2)).isoformat(),
+                    date=datetime.now().strftime('%Y-%m-%d')
+                ),
+                Transaction(
+                    user_id='demo_user',
+                    type='expense',
+                    amount=50.0,
+                    description='Transport Cost',
+                    category='transport',
+                    timestamp=(datetime.now() - timedelta(hours=3)).isoformat(),
+                    date=datetime.now().strftime('%Y-%m-%d')
+                ),
+                Transaction(
+                    user_id='demo_user',
+                    type='sale',
+                    amount=200.0,
+                    description='Service Charge',
+                    category='service',
+                    timestamp=(datetime.now() - timedelta(hours=4)).isoformat(),
+                    date=datetime.now().strftime('%Y-%m-%d')
+                )
+            ]
+            
+            for transaction in demo_transactions:
+                db_manager.add_transaction(transaction)
+            
+            logger.info("Demo data created successfully")
+    
+    except Exception as e:
+        logger.error(f"Error creating demo data: {e}")
+    
+    # Run the application
     app.run(debug=True, host='0.0.0.0', port=5000)

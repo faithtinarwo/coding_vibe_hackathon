@@ -1,339 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>TradeWise - Professional Trading Platform</title>
-    <link rel="stylesheet" href="static/styles.css" />
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeWise - Your Business Companion</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-    <!-- Header -->
-    <header class="header">
-        <div class="nav-container">
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
             <div class="logo">
-                <i class="fas fa-chart-line"></i>
+                <i class="fas fa-store"></i>
                 <span>TradeWise</span>
             </div>
-            <nav class="nav-menu">
-                <a href="#dashboard" class="nav-link active" data-section="dashboard">
-                    <i class="fas fa-tachometer-alt"></i> Dashboard
-                </a>
-                <a href="#portfolio" class="nav-link" data-section="portfolio">
-                    <i class="fas fa-briefcase"></i> Portfolio
-                </a>
-                <a href="#trading" class="nav-link" data-section="trading">
-                    <i class="fas fa-exchange-alt"></i> Trading
-                </a>
-                <a href="#watchlist" class="nav-link" data-section="watchlist">
-                    <i class="fas fa-eye"></i> Watchlist
-                </a>
-                <a href="#history" class="nav-link" data-section="history">
-                    <i class="fas fa-history"></i> History
-                </a>
-            </nav>
-            <div class="user-section">
-                <div class="user-info" id="userInfo" style="display: none;">
-                    <span id="userBalance">R0.00</span>
-                    <button class="logout-btn" onclick="logout()">
-                        <i class="fas fa-sign-out-alt"></i>
-                    </button>
-                </div>
-                <div class="auth-buttons" id="authButtons">
-                    <button class="btn-login" onclick="showLogin()">Login</button>
-                    <button class="btn-register" onclick="showRegister()">Register</button>
-                </div>
+            <div class="balance-display">
+                <span class="balance-label">Today's Profit</span>
+                <span class="balance-amount" id="todayProfit">R0</span>
             </div>
-        </div>
-    </header>
+        </header>
 
-    <!-- AI Business Companion Section -->
-    <section id="ai-companion" class="section ai-companion-section">
-        <div class="section-header">
-            <h2>Voice-First AI Business Companion</h2>
-            <p>Empower your trading with cutting-edge AI features designed to boost your business efficiency and joy.</p>
-        </div>
-        <div class="ai-features-grid">
-            <div class="feature-card">
-                <i class="fas fa-microphone fa-3x"></i>
-                <h3>Voice-First Tracking</h3>
-                <p>Track your trades and portfolio hands-free with voice commands.</p>
-            </div>
-            <div class="feature-card">
-                <i class="fas fa-camera fa-3x"></i>
-                <h3>Smart Photo Capture</h3>
-                <p>Quickly capture and analyze business documents and receipts.</p>
-            </div>
-            <div class="feature-card">
-                <i class="fas fa-robot fa-3x"></i>
-                <h3>AI Business Coach</h3>
-                <p>Get personalized trading advice and coaching powered by AI.</p>
-            </div>
-            <div class="feature-card">
-                <i class="fas fa-smile fa-3x"></i>
-                <h3>Joy-Driven Experience</h3>
-                <p>Engage with your business in a fun and motivating environment.</p>
-            </div>
-        </div>
-    </section>
+        <!-- Voice Command Button -->
+        <section class="voice-section">
+            <button class="voice-btn" id="voiceBtn" onclick="toggleVoiceRecording()">
+                <i class="fas fa-microphone" id="voiceIcon"></i>
+                <span class="voice-text" id="voiceText">Tap to speak</span>
+            </button>
+            <div class="voice-feedback" id="voiceFeedback">Say things like "I sold apples for 50 rupees" or "Bought supplies for 200"</div>
+        </section>
 
-    <!-- Main Content -->
-    <main class="main-content">
-        <!-- Dashboard Section -->
-        <section id="dashboard" class="section active">
-            <div class="dashboard-grid">
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-dollar-sign"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 id="totalValue">R0.00</h3>
-                            <p>Total Portfolio Value</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon green">
-                            <i class="fas fa-chart-line"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 id="totalGain">R0.00</h3>
-                            <p>Total P&amp;L</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon blue">
-                            <i class="fas fa-wallet"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 id="cashBalance">R0.00</h3>
-                            <p>Available Cash</p>
-                        </div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-icon orange">
-                            <i class="fas fa-chart-pie"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 id="totalPositions">0</h3>
-                            <p>Total Positions</p>
-                        </div>
-                    </div>
+        <!-- Quick Actions -->
+        <section class="quick-actions">
+            <button class="action-btn sale" onclick="showTransactionModal('sale')">
+                <i class="fas fa-plus-circle"></i>
+                <span>Record Sale</span>
+            </button>
+            <button class="action-btn expense" onclick="showTransactionModal('expense')">
+                <i class="fas fa-minus-circle"></i>
+                <span>Add Expense</span>
+            </button>
+            <button class="action-btn camera" onclick="openCamera()">
+                <i class="fas fa-camera"></i>
+                <span>Scan Receipt</span>
+            </button>
+        </section>
+
+        <!-- Stats Dashboard -->
+        <section class="stats-container">
+            <div class="stat-card">
+                <i class="fas fa-chart-line stat-icon positive"></i>
+                <div class="stat-content">
+                    <span class="stat-number" id="totalSales">R0</span>
+                    <span class="stat-label">Total Sales</span>
                 </div>
-                
-                <div class="market-overview">
-                    <h2>Market Overview</h2>
-                    <div class="market-indices">
-                        <div class="index-card" data-symbol="^GSPC">
-                            <h4>S&amp;P 500</h4>
-                            <div class="price-info">
-                                <span class="price">--</span>
-                                <span class="change">--</span>
-                            </div>
-                        </div>
-                        <div class="index-card" data-symbol="^DJI">
-                            <h4>Dow Jones</h4>
-                            <div class="price-info">
-                                <span class="price">--</span>
-                                <span class="change">--</span>
-                            </div>
-                        </div>
-                        <div class="index-card" data-symbol="^IXIC">
-                            <h4>NASDAQ</h4>
-                            <div class="price-info">
-                                <span class="price">--</span>
-                                <span class="change">--</span>
-                            </div>
-                        </div>
-                    </div>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-shopping-cart stat-icon negative"></i>
+                <div class="stat-content">
+                    <span class="stat-number" id="totalExpenses">R0</span>
+                    <span class="stat-label">Total Expenses</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-wallet stat-icon neutral"></i>
+                <div class="stat-content">
+                    <span class="stat-number" id="netProfit">R0</span>
+                    <span class="stat-label">Net Profit</span>
                 </div>
             </div>
         </section>
 
-        <!-- Portfolio Section -->
-        <section id="portfolio" class="section">
-            <div class="section-header">
-                <h2>My Portfolio</h2>
-                <button class="refresh-btn" onclick="loadPortfolio()">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
-            </div>
-            <div class="portfolio-table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Symbol</th>
-                            <th>Quantity</th>
-                            <th>Avg Price</th>
-                            <th>Current Price</th>
-                            <th>Market Value</th>
-                            <th>P&amp;L</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="portfolioTableBody">
-                        <tr class="no-data">
-                            <td colspan="7">No positions found</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- Trading Section -->
-        <section id="trading" class="section">
-            <div class="trading-container">
-                <div class="stock-search">
-                    <h2>Stock Trading</h2>
-                    <div class="search-container">
-                        <input type="text" id="stockSymbol" placeholder="Enter stock symbol (e.g., AAPL)" maxlength="10" />
-                        <button onclick="searchStock()" class="search-btn">
-                            <i class="fas fa-search"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="stock-info" id="stockInfo" style="display: none;">
-                    <div class="stock-header">
-                        <h3 id="stockSymbolDisplay">--</h3>
-                        <div class="stock-price">
-                            <span id="stockPrice">R0.00</span>
-                            <span id="stockChange" class="change">+R0.00 (0.00%)</span>
-                        </div>
-                    </div>
-                    
-                    <div class="stock-details">
-                        <div class="detail-item">
-                            <label>Volume:</label>
-                            <span id="stockVolume">--</span>
-                        </div>
-                        <div class="detail-item">
-                            <label>Day High:</label>
-                            <span id="stockHigh">--</span>
-                        </div>
-                        <div class="detail-item">
-                            <label>Day Low:</label>
-                            <span id="stockLow">--</span>
-                        </div>
-                        <div class="detail-item">
-                            <label>Market Cap:</label>
-                            <span id="stockMarketCap">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="trade-form">
-                    <h3>Place Order</h3>
-                    <form id="tradeForm" onsubmit="return placeOrder(event)">
-                        <label for="orderType">Order Type:</label>
-                        <select id="orderType" required>
-                            <option value="buy">Buy</option>
-                            <option value="sell">Sell</option>
-                        </select>
-
-                        <label for="orderQuantity">Quantity:</label>
-                        <input type="number" id="orderQuantity" min="1" required />
-
-                        <label for="orderPrice">Price per Share (ZAR):</label>
-                        <input type="number" id="orderPrice" min="0.01" step="0.01" required />
-
-                        <button type="submit" class="btn-submit">Submit Order</button>
-                    </form>
+        <!-- Recent Transactions -->
+        <section class="transactions-section">
+            <h3><i class="fas fa-history"></i> Recent Activity</h3>
+            <div class="transactions-list" id="transactionsList">
+                <div class="empty-state">
+                    <i class="fas fa-clipboard-list"></i>
+                    <p>No transactions yet. Start by recording your first sale!</p>
                 </div>
             </div>
         </section>
 
-        <!-- Watchlist Section -->
-        <section id="watchlist" class="section">
-            <div class="section-header">
-                <h2>Watchlist</h2>
-                <button class="refresh-btn" onclick="loadWatchlist()">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
-            </div>
-            <div class="watchlist-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Symbol</th>
-                            <th>Last Price</th>
-                            <th>Change</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="watchlistTableBody">
-                        <tr class="no-data">
-                            <td colspan="4">Watchlist is empty</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="add-watchlist">
-                <input type="text" id="watchlistSymbol" placeholder="Add symbol (e.g. TSLA)" maxlength="10" />
-                <button onclick="addToWatchlist()"><i class="fas fa-plus"></i> Add</button>
+        <!-- AI Coach Section -->
+        <section class="ai-coach-section">
+            <div class="coach-card" onclick="showCoachTip()">
+                <i class="fas fa-robot coach-icon"></i>
+                <div class="coach-content">
+                    <h4>AI Business Coach</h4>
+                    <p id="coachTip">Track your daily sales to see your progress!</p>
+                </div>
             </div>
         </section>
+    </div>
 
-        <!-- History Section -->
-        <section id="history" class="section">
-            <div class="section-header">
-                <h2>Trade History</h2>
-            </div>
-            <div class="history-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Symbol</th>
-                            <th>Type</th>
-                            <th>Quantity</th>
-                            <th>Price</th>
-                            <th>Total (ZAR)</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyTableBody">
-                        <tr class="no-data">
-                            <td colspan="7">No trade history found</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-    </main>
-
-    <!-- Login Modal -->
-    <div id="loginModal" class="modal" style="display: none;">
+    <!-- Transaction Modal -->
+    <div class="modal" id="transactionModal">
         <div class="modal-content">
-            <span class="close" onclick="closeLogin()">&times;</span>
-            <h2>Login</h2>
-            <form id="loginForm" onsubmit="return login(event)">
-                <label for="loginEmail">Email:</label>
-                <input type="email" id="loginEmail" required />
-                <label for="loginPassword">Password:</label>
-                <input type="password" id="loginPassword" required />
-                <button type="submit" class="btn-submit">Login</button>
+            <span class="close" onclick="closeTransactionModal()">&times;</span>
+            <h2 id="modalTitle">Record Transaction</h2>
+            <form id="transactionForm" onsubmit="submitTransaction(event)">
+                <div class="form-group">
+                    <label for="amount">Amount (R)</label>
+                    <input type="number" id="amount" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <input type="text" id="description" required>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category</label>
+                    <select id="category" required>
+                        <option value="">Select Category</option>
+                        <option value="product-sale">Product Sale</option>
+                        <option value="service">Service</option>
+                        <option value="supplies">Supplies</option>
+                        <option value="transport">Transport</option>
+                        <option value="food">Food</option>
+                        <option value="utilities">Utilities</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <button type="submit" class="submit-btn" id="submitBtn">Record Transaction</button>
             </form>
         </div>
     </div>
 
-    <!-- Register Modal -->
-    <div id="registerModal" class="modal" style="display: none;">
+    <!-- Camera Modal -->
+    <div class="modal" id="cameraModal">
         <div class="modal-content">
-            <span class="close" onclick="closeRegister()">&times;</span>
-            <h2>Register</h2>
-            <form id="registerForm" onsubmit="return register(event)">
-                <label for="registerName">Full Name:</label>
-                <input type="text" id="registerName" required />
-                <label for="registerEmail">Email:</label>
-                <input type="email" id="registerEmail" required />
-                <label for="registerPassword">Password:</label>
-                <input type="password" id="registerPassword" required minlength="6" />
-                <button type="submit" class="btn-submit">Register</button>
-            </form>
+            <span class="close" onclick="closeCameraModal()">&times;</span>
+            <h2>Scan Receipt</h2>
+            <div class="camera-container">
+                <video id="cameraFeed" autoplay playsinline></video>
+                <canvas id="cameraCanvas" style="display: none;"></canvas>
+            </div>
+            <div class="camera-controls">
+                <button onclick="capturePhoto()" class="capture-btn">
+                    <i class="fas fa-camera"></i> Capture
+                </button>
+                <input type="file" id="fileInput" accept="image/*" onchange="processImage(event)" style="display: none;">
+                <button onclick="document.getElementById('fileInput').click()" class="upload-btn">
+                    <i class="fas fa-upload"></i> Upload
+                </button>
+            </div>
+            <div class="processing-result" id="processingResult"></div>
         </div>
     </div>
 
-    <script src="static/scripts.js"></script>
+    <!-- Celebration Modal -->
+    <div class="celebration-modal" id="celebrationModal">
+        <div class="celebration-content">
+            <div class="celebration-icon">🎉</div>
+            <h2 id="celebrationTitle">Great job!</h2>
+            <p id="celebrationMessage">You're doing amazing!</p>
+            <button onclick="closeCelebration()">Continue</button>
+        </div>
+    </div>
+
+    <!-- Success Toast -->
+    <div class="toast" id="toast">
+        <i class="fas fa-check-circle"></i>
+        <span id="toastMessage">Transaction recorded successfully!</span>
+    </div>
+
+    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
 </body>
 </html>
