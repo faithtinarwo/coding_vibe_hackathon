@@ -1,5 +1,4 @@
-flask==2.3.2
-requests>=2.28.0
-sqlalchemy
-gunicorn==20.1.0flask
+flask
 flask_cors
+sqlalchemy
+gunicorn==20.1.0
