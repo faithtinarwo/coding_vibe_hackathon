@@ -19,7 +19,7 @@ const coachTips = [
     "Great job! Your profit is increasing. Keep it up!",
     "Consider categorizing your expenses for better insights.",
     "Voice commands make tracking so much easier!",
-    "Every rupee counts - track those small sales too!",
+    "Every rands counts - track those small sales too!",
     "Your business is growing! Time to celebrate! 🎉",
     "Regular tracking leads to better business decisions.",
     "Keep your receipts organized for tax season."
